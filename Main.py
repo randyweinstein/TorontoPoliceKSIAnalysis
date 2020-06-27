@@ -5,7 +5,11 @@ import numpy as np
 import pandas as pd
 import datetime
 
-query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?where=Index_%20%3E%3D%203389067%20AND%20Index_%20%3C%3D%203389167&outFields=*&outSR=4326&f=json"
+index_start: int = 1
+index_end: int = 3389167
+
+query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?where=Index_%20%3E%3D%20" + str(index_start) + "%20AND%20Index_%20%3C%3D%20"+ str(index_end) + "&outFields=*&outSR=4326&f=json"
+
 debug: bool = True
 
 
@@ -24,13 +28,6 @@ def main():
     column_mapper: ColumnMapper = ColumnMapper(json_parsed)
     if debug:
         print(column_mapper)
-        for columnType in column_mapper.get_column_types():
-            print(columnType)
-
-
-
-    # df = pd.read_json(path_or_buf=dataRowsJson, orient="records")
-
 
 
     rowsJson = json_parsed["features"]
@@ -43,9 +40,13 @@ def main():
             row.append(column_mapper.get_int_for_value(value))
         rows.append(row)
 
-    df = pd.DataFrame(rows)
-    print(df)
+    df = pd.DataFrame(data=rows, columns=column_mapper.get_column_names())
 
+    print(df)
+    print(df.dtypes)
+
+    if debug:
+        print(column_mapper)
 
 
 # Installing certs in Python to open SSL connections is challenging.
@@ -70,8 +71,14 @@ class ColumnType:
         self.datatype: str = datatype
         self.possible_values: dict = dict()
 
+
     def __str__(self):
-        return "ColumnType Object[name: " + str(self.name) + ", datatype: " + str(self.datatype) + "]"
+        current_map = "ColumnType Object: \n"
+        current_map += "\tName: " + self.name + "\n"
+        current_map += "\tType: " + self.datatype + "\n"
+        for categorical_data in self.possible_values.keys():
+            current_map += "\t\t" + str(self.possible_values[categorical_data]) + ":  " + categorical_data + "\n"
+        return current_map
 
     def transform_value(self, value: str):
         # don't wast time on null values.  Just return the null value
@@ -83,7 +90,7 @@ class ColumnType:
 
         # if the value is a date then we might want to treat it differently at some point
         if self.datatype == "Date":
-            int(value)
+            return int(value)
 
         # OID is a special type in KIS but it looks to just be an int
         if self.datatype == "OID":
@@ -108,10 +115,9 @@ class ColumnType:
 
             # if this is categorical data, we are are going to assign int values incrementally
             # and always return the same int for a given string value
-            if value in self.possible_values:
-                return self.possible_values[value]
-            else:
-                self.possible_values[value] = len(self.possible_values)
+            if value not in self.possible_values:
+                self.possible_values[value] = int(len(self.possible_values) + 1)
+            return self.possible_values[value]
 
 
 class ColumnMapper:
@@ -124,7 +130,11 @@ class ColumnMapper:
             self.columns[name] = ColumnType(name, formatted_type)
 
     def __str__(self):
-        return "ColumnMapper Object"
+        current_map: str = "ColumnMapper Object\n"
+        for column_type in self.columns.values():
+            current_map += str(column_type)
+        return current_map
+
 
     def get_int_for_value(self, value: tuple):
         column_type: ColumnType = self.columns[value[0]]
@@ -132,6 +142,9 @@ class ColumnMapper:
 
     def get_column_types(self):
         return self.columns
+
+    def get_column_names(self):
+        return self.columns.keys()
 
 
 main()
