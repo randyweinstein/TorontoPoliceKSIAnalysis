@@ -5,12 +5,7 @@ import numpy as np
 import pandas as pd
 import datetime
 
-index_start: int = 1
-index_end: int = 3389167
-
-query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?where=Index_%20%3E%3D%20" + str(index_start) + "%20AND%20Index_%20%3C%3D%20"+ str(index_end) + "&outFields=*&outSR=4326&f=json"
-
-debug: bool = True
+debug = True
 
 
 def main():
@@ -18,51 +13,80 @@ def main():
         print("debug mode ON")
     else:
         print("debug mode OFF")
-    json_raw = get_response(query)
-    json_parsed = json.loads(json_raw)
+
+    ksi = KSIFeed(index_start=1, index_end=3389167)
+
     if debug:
-        print("json_parsed: ")
-        print(json_parsed)
+        print("Query:")
+        print(ksi.get_query())
 
-    # column names and metadata are stored in a parallel level as the data in the JSON. We'll use this metadata to help parse the data
-    column_mapper: ColumnMapper = ColumnMapper(json_parsed)
-    if debug:
-        print(column_mapper)
+        print("Json:")
+        print(ksi.get_json());
 
+        print("Column Mapping:")
+        print(ksi.get_column_mapper())
 
-    rowsJson = json_parsed["features"]
-    rows = list()
-    for rowJson in rowsJson:
-        row = list()
-        rows_json: dict = rowJson["attributes"]
-        row_json = rows_json.items()
-        for value in row_json:
-            row.append(column_mapper.get_int_for_value(value))
-        rows.append(row)
+    df = ksi.get_data_frame()
 
-    df = pd.DataFrame(data=rows, columns=column_mapper.get_column_names())
-
-    print(df)
     print(df.dtypes)
-
-    if debug:
-        print(column_mapper)
+    print(df)
 
 
-# Installing certs in Python to open SSL connections is challenging.
-# Based on the level of difficultly people had installing numpy & pandas, I decided to just circumvent the necessity by
-# using _create_unverified_context().  This prints an error on a non 200 HTTP response code.
-def get_response(query):
-    if (debug):
-        print("calling KSI API with the following URL: ")
-        print(query)
-    context = ssl._create_unverified_context()
-    open_url = urllib.request.urlopen(query, context=context)
-    if open_url.getcode() == 200:
-        data = open_url.read()
-    else:
-        print("Error receiving data", open_url.getcode())
-    return data
+class KSIFeed:
+
+    def __init__(self, index_start: int = 1, index_end: int = 3389167):
+        self._query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?where=Index_%20%3E%3D%20" + str(
+            index_start) + "%20AND%20Index_%20%3C%3D%20" + str(index_end) + "&outFields=*&outSR=4326&f=json"
+        json_raw = self.__get_response(self._query)
+        self._json_parsed = json.loads(json_raw)
+
+        # column names and metadata are stored in a parallel level as the data in the JSON.
+        # We'll use this metadata to help parse the data
+        self._column_mapper: ColumnMapper = ColumnMapper(self._json_parsed)
+
+        rows_json = self._json_parsed["features"]
+        self._rows = list()
+        for rows_json in rows_json:
+            row = list()
+            rows_json: dict = rows_json["attributes"]
+            row_json = rows_json.items()
+            for value in row_json:
+                row.append(self._column_mapper.get_int_for_value(value))
+            self._rows.append(row)
+
+    def get_json(self):
+        return self._json_parsed
+
+    def get_query(self):
+        return self._query
+
+    def get_rows(self):
+        return self._rows
+
+    def get_column_mapper(self):
+        return self._column_mapper
+
+    def get_data_frame(self):
+        df = pd.DataFrame(data=self._rows, columns=self._column_mapper.get_column_names())
+        return df
+
+    def __get_response(self, query):
+        '''
+        Installing certs in Python to open SSL connections is challenging.
+        Based on the level of difficultly people had installing numpy & pandas, I decided to just circumvent the necessity by
+        using _create_unverified_context().  This prints an error on a non 200 HTTP response code.
+        :return:
+        '''
+        if (debug):
+            print("calling KSI API with the following URL: ")
+            print(query)
+        context = ssl._create_unverified_context()
+        open_url = urllib.request.urlopen(query, context=context)
+        if open_url.getcode() == 200:
+            data = open_url.read()
+        else:
+            print("Error receiving data", open_url.getcode())
+        return data
 
 
 class ColumnType:
@@ -70,7 +94,6 @@ class ColumnType:
         self.name: str = name
         self.datatype: str = datatype
         self.possible_values: dict = dict()
-
 
     def __str__(self):
         current_map = "ColumnType Object: \n"
@@ -134,7 +157,6 @@ class ColumnMapper:
         for column_type in self.columns.values():
             current_map += str(column_type)
         return current_map
-
 
     def get_int_for_value(self, value: tuple):
         column_type: ColumnType = self.columns[value[0]]
