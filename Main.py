@@ -18,25 +18,48 @@ debug = True
 
 def main():
     """This main()function is all that anyone working on this project should need to alter. This provides sample code on how to retrieve a Pandas DataFrame from a KSIFeed object, and how to retrieve the column mapping for categorical data"""
-    if debug:
-        print("debug mode ON")
-    else:
-        print("debug mode OFF")
+
 
     ksi = KSIFeed(year_start=2005, year_end=2007)
 
-    if debug:
-        # if you want to see what API call was made
-        print("Query:")
-        print(ksi.get_query())
+    injury = dict()
+    injury["None"] = 1
+    injury["Minimal"] = 2
+    injury["Minor"] = 3
+    injury["Major"] = 4
+    injury["Fatal"] = 5
+    ksi.set_ordinal_values("INJURY", injury)
 
-        # if you want to see what the API returned
-        # print("Json:")
-        # print(ksi.get_json());
+    invage = dict()
+    invage["0 to 4"] = 1
+    invage["5 to 9"] = 2
+    invage["10 to 14"] = 3
+    invage["15 to 19"] = 4
+    invage["20 to 24"] = 5
+    invage["25 to 29"] = 6
+    invage["30 to 34"] = 7
+    invage["35 to 39"] = 8
+    invage["40 to 44"] = 9
+    invage["45 to 49"] = 10
+    invage["50 to 54"] = 11
+    invage["55 to 59"] = 12
+    invage["60 to 64"] = 13
+    invage["65 to 69"] = 14
+    invage["70 to 74"] = 15
+    invage["75 to 79"] = 16
+    invage["80 to 84"] = 17
+    invage["85 to 89"] = 18
+    invage["90 to 94"] = 19
+    invage["Over 95"] = 20
+    invage["unknown"] = 21
+    ksi.set_ordinal_values("INVAGE", invage)
 
-        # if you want to see the legend for mapped categorical values
-        # print("Column Mapping:")
-        # print(ksi.get_column_mapper())
+    ksi.parse()
+
+
+    # if you want to see the legend for mapped categorical values
+    print("Column Mapping:")
+    print(ksi.get_column_mapper())
 
     # the main call. Here is your Pandas DataFrame
     df = ksi.get_data_frame()
@@ -55,6 +78,9 @@ class KSIFeed:
     :argument year_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
     year_start and year_end must both be set to be included in the query"""
     def __init__(self, index_start: int = None, index_end: int = None, year_start: int = None, year_end: int = None):
+
+        self._column_mapper: ColumnMapper = ColumnMapper()
+
         self._query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?&outFields=*&outSR=4326&f=json&"
         # if type(index_start)__name__ == "int" and type(index_end) == "int":
         if isinstance(index_start, int) and isinstance(index_end, int):
@@ -65,13 +91,23 @@ class KSIFeed:
             self._query = self._query + "where=YEAR%20%3E%3D%20" + str(year_start) + "%20AND%20YEAR%20%3C%3D%20" + str(year_end)
         if self._query.find("where") == -1:
             self._query += "where=1%3D1"
-        print("Calling Query: " + self._query)
+        print("Query to be called: " + self._query)
+
+
+
+    def set_ordinal_values(self, column_name: str, value_map: dict):
+        """This must be called before parse"""
+        self._column_mapper.set_ordinal_values(column_name, value_map)
+
+    def parse(self):
+        """This this will go get the data and populate the internal map"""
         json_raw = self.__get_response(self._query)
         self._json_parsed = json.loads(json_raw)
 
         # column names and metadata are stored in a parallel level as the data in the JSON.
         # We'll use this metadata to help parse the data
-        self._column_mapper: ColumnMapper = ColumnMapper(self._json_parsed)
+
+        self._column_mapper.load_columns_from_json(self._json_parsed)
 
         rows_json = self._json_parsed["features"]
         self._rows = list()
@@ -145,6 +181,13 @@ class ColumnType:
             current_map += "\t\t" + str(self.possible_values[categorical_data]) + ":  " + categorical_data + "\n"
         return current_map
 
+    def override_map(self, dict):
+        """This is used by the ColumnMapper to handle ordinal values"""
+        if self.possible_values.__len__() > 1:
+            print ("Cannot ovveride value map for " + self.name + ", the current map is not empty");
+        else:
+            self.possible_values = dict
+
     def transform_value(self, value: str):
         """This is the "meat" of the project. The logic is as follows:
         1. None values are returned as is
@@ -201,13 +244,10 @@ class ColumnType:
 
 class ColumnMapper:
     '''This object builds a list of ColumnType objects from the "fields" section of the JSON. Use this object to interact with ColumnTypes instead of instatiating ColumnTypes directly'''
-    def __init__(self, columns_json: dict):
+    def __init__(self):
         self.columns: dict = dict()
-        for field in columns_json["fields"]:
-            name = field["name"]
-            sql_type: str = str(field["type"])
-            formatted_type = sql_type[13:]
-            self.columns[name] = ColumnType(name, formatted_type)
+        self.ordinals_override: dict = dict()
+
 
     def __str__(self):
         """Prints out the current list of ColumnTypes
@@ -216,6 +256,21 @@ class ColumnMapper:
         for column_type in self.columns.values():
             current_map += str(column_type)
         return current_map
+
+    def set_ordinal_values(self, column_name: str, value_map: dict):
+        column_type: ColumnType = ColumnType(column_name, "OVERRIDE")
+        column_type.override_map(value_map)
+        self.ordinals_override[column_name] =column_type
+
+    def load_columns_from_json(self, columns_json: dict):
+        """ to be called after calling set_ordinal_values() but before calling transform_value()"""
+        for field in columns_json["fields"]:
+            name = field["name"]
+            sql_type: str = str(field["type"])
+            formatted_type = sql_type[13:]
+            self.columns[name] = ColumnType(name, formatted_type)
+        for ordinal in self.ordinals_override.keys():
+            self.columns[ordinal] = self.ordinals_override[ordinal]
 
     def transform_value(self, value: tuple):
         """Convenience method to look up the correct ColumnType for a value

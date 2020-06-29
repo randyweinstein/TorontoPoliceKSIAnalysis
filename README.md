@@ -15,14 +15,35 @@ This main()function is all that anyone working on this project should need to al
 
 ```python
 class KSIFeed():
- |  KSIFeed(index_start: int, index_end: int)
+ |  KSIFeed(index_start: int = None, index_end: int = None, year_start: int = None, year_end: int = None)
 ```
 
 This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
 You may also retrieve the ColumnMapper from this object to see how the values were mapped.
-:argument index_start the starting index of the values we want to retrieve, defaults to 0
-:argument index_end largest index of the values we want to retrive, defaults to 1000000000,
-which gives us the max2000 rows at present.
+:argument index_start the starting index of the values we want to retrieve, if not set will retrieve all indexes
+:argument index_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+index_start and index_end must both be set to be included in the query
+:argument year_start the starting year of the values we want to retrieve, if not set will retrieve all indexes.
+:argument year_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+year_start and year_end must both be set to be included in the query
+
+<a name=".Main.KSIFeed.set_ordinal_values"></a>
+#### set\_ordinal\_values
+
+```python
+ | set_ordinal_values(column_name: str, value_map: dict)
+```
+
+This must be called before parse
+
+<a name=".Main.KSIFeed.parse"></a>
+#### parse
+
+```python
+ | parse()
+```
+
+This this will go get the data and populate the internal map
 
 <a name=".Main.KSIFeed.get_json"></a>
 #### get\_json
@@ -97,6 +118,15 @@ If it is called before the data is parsed, categorical data will not yet be mapp
 Therefore, this should be accessed via the __str__() method of the ColumnMapper object as the categorical data
 is mapped on ColumnMapper creation and will always return the full mapping for categorical data
 
+<a name=".Main.ColumnType.override_map"></a>
+#### override\_map
+
+```python
+ | override_map(dict)
+```
+
+This is used by the ColumnMapper to handle ordinal values
+
 <a name=".Main.ColumnType.transform_value"></a>
 #### transform\_value
 
@@ -124,7 +154,7 @@ This is the "meat" of the project. The logic is as follows:
 
 ```python
 class ColumnMapper():
- |  ColumnMapper(columns_json: dict)
+ |  ColumnMapper()
 ```
 
 This object builds a list of ColumnType objects from the "fields" section of the JSON. Use this object to interact with ColumnTypes instead of instatiating ColumnTypes directly
@@ -138,6 +168,15 @@ This object builds a list of ColumnType objects from the "fields" section of the
 
 Prints out the current list of ColumnTypes
 :returns str
+
+<a name=".Main.ColumnMapper.load_columns_from_json"></a>
+#### load\_columns\_from\_json
+
+```python
+ | load_columns_from_json(columns_json: dict)
+```
+
+to be called after calling set_ordinal_values() but before calling transform_value()
 
 <a name=".Main.ColumnMapper.transform_value"></a>
 #### transform\_value
