@@ -15,14 +15,14 @@ This main()function is all that anyone working on this project should need to al
 
 ```python
 class KSIFeed():
- |  KSIFeed(index_start: int = 1, index_end: int = 3389167)
+ |  KSIFeed(index_start: int, index_end: int)
 ```
 
 This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
 You may also retrieve the ColumnMapper from this object to see how the values were mapped.
 :argument index_start the starting index of the values we want to retrieve, defaults to 0
-:argument index_end largest index of the values we want to retrive, defaults to 3389167,
-which gives us 167 rows at present.
+:argument index_end largest index of the values we want to retrive, defaults to 1000000000,
+which gives us the max2000 rows at present.
 
 <a name=".Main.KSIFeed.get_json"></a>
 #### get\_json
@@ -49,7 +49,25 @@ which gives us 167 rows at present.
  | get_rows()
 ```
 
-:returns list a python 2 diment
+:returns list a python 2 dimensional list of mixed datatypes in consistent order
+
+<a name=".Main.KSIFeed.get_column_mapper"></a>
+#### get\_column\_mapper
+
+```python
+ | get_column_mapper()
+```
+
+:returns ColumnMapper object
+
+<a name=".Main.KSIFeed.get_data_frame"></a>
+#### get\_data\_frame
+
+```python
+ | get_data_frame()
+```
+
+:returns Pandas DataFrame. This is the main method of this class
 
 <a name=".Main.ColumnType"></a>
 ## ColumnType Objects

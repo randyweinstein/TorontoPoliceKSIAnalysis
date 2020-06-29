@@ -4,6 +4,8 @@ import ssl
 import numpy as np
 import pandas as pd
 import datetime
+from datetime import timezone
+
 
 debug = True
 
@@ -21,7 +23,7 @@ def main():
     else:
         print("debug mode OFF")
 
-    ksi = KSIFeed(index_start=1, index_end=3389167)
+    ksi = KSIFeed(year_start=2005, year_end=2007)
 
     if debug:
         # if you want to see what API call was made
@@ -29,12 +31,12 @@ def main():
         print(ksi.get_query())
 
         # if you want to see what the API returned
-        print("Json:")
-        print(ksi.get_json());
+        # print("Json:")
+        # print(ksi.get_json());
 
         # if you want to see the legend for mapped categorical values
-        print("Column Mapping:")
-        print(ksi.get_column_mapper())
+        # print("Column Mapping:")
+        # print(ksi.get_column_mapper())
 
     # the main call. Here is your Pandas DataFrame
     df = ksi.get_data_frame()
@@ -46,12 +48,24 @@ def main():
 class KSIFeed:
     """This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
     You may also retrieve the ColumnMapper from this object to see how the values were mapped.
-    :argument index_start the starting index of the values we want to retrieve, defaults to 0
-    :argument index_end largest index of the values we want to retrive, defaults to 3389167,
-    which gives us 167 rows at present."""
-    def __init__(self, index_start: int = 1, index_end: int = 3389167):
-        self._query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?where=Index_%20%3E%3D%20" + str(
-            index_start) + "%20AND%20Index_%20%3C%3D%20" + str(index_end) + "&outFields=*&outSR=4326&f=json"
+    :argument index_start the starting index of the values we want to retrieve, if not set will retrieve all indexes
+    :argument index_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+    index_start and index_end must both be set to be included in the query
+    :argument year_start the starting year of the values we want to retrieve, if not set will retrieve all indexes.
+    :argument year_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+    year_start and year_end must both be set to be included in the query"""
+    def __init__(self, index_start: int = None, index_end: int = None, year_start: int = None, year_end: int = None):
+        self._query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?&outFields=*&outSR=4326&f=json&"
+        # if type(index_start)__name__ == "int" and type(index_end) == "int":
+        if isinstance(index_start, int) and isinstance(index_end, int):
+            self._query.join("where=Index_%20%3E%3D%20", str(index_start), "%20AND%20Index_%20%3C%3D%20", str(index_end))
+        if isinstance(year_start, int) and isinstance(year_end, int):
+            # start = int(datetime.datetime(year=year_start, day=1, month=1, tzinfo=timezone.utc).timestamp())
+            # end = int(datetime.datetime(year=year_end, day=1, month=1, tzinfo=timezone.utc).timestamp())
+            self._query = self._query + "where=YEAR%20%3E%3D%20" + str(year_start) + "%20AND%20YEAR%20%3C%3D%20" + str(year_end)
+        if self._query.find("where") == -1:
+            self._query += "where=1%3D1"
+        print("Calling Query: " + self._query)
         json_raw = self.__get_response(self._query)
         self._json_parsed = json.loads(json_raw)
 
