@@ -55,11 +55,12 @@ def main():
     invage["unknown"] = 21
     ksi.set_ordinal_values("INVAGE", invage)
 
-    ksi.parse()
+    ksi.run()
 
     # if you want to see the legend for mapped categorical values
-    print("Column Mapping:")
-    print(ksi.get_column_mapper())
+    # print("Column Mapping:")
+    # print(ksi.get_column_mapper())
+    print(ksi.get_rows())
 
     # the main call. Here is your Pandas DataFrame
     df = ksi.get_data_frame()
@@ -181,6 +182,7 @@ class ColumnMapper:
 
     def load_columns_from_json(self, columns_json: dict):
         """ to be called after calling set_ordinal_values() but before calling transform_value()"""
+
         for field in columns_json["fields"]:
             name = field["name"]
             sql_type: str = str(field["type"])
@@ -213,39 +215,24 @@ class KSIColumnMapper(ColumnMapper):
 
 
 
+
 class Feed:
 
     def __init__(self, baseQuery: str, mapper: ColumnMapper = ColumnMapper()):
         self._column_mapper: mapper
         self._query = baseQuery
+        self._rows = list();
 
     def set_ordinal_values(self, column_name: str, value_map: dict):
         """This must be called before parse"""
         self.get_column_mapper().set_ordinal_values(column_name, value_map)
 
-    def parse(self):
+    def parse(self, json:object = {}):
         """This this will go get the data and populate the internal map"""
-        json_raw = self._get_response(self._query)
-        self._json_parsed = json.loads(json_raw)
+        return [[0, 1, 2, 3, 4], [1, 3, 5, 6, 7], [3, 5, 6, 7, 9]]
 
-        # column names and metadata are stored in a parallel level as the data in the JSON.
-        # We'll use this metadata to help parse the data
-
-        self.get_column_mapper().load_columns_from_json(self._json_parsed)
-
-        rows_json = self._json_parsed["features"]
-        self._rows = list()
-        for rows_json in rows_json:
-            row = list()
-            rows_json: dict = rows_json["attributes"]
-            row_json = rows_json.items()
-            for value in row_json:
-                row.append(self.get_column_mapper().transform_value(value))
-            self._rows.append(row)
-
-    def get_json(self):
-        """:returns the json that the API returned, already parsed in Python"""
-        return self._json_parsed
+    def run(self):
+        self._rows = self.parse()
 
     def get_query(self):
         """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data"""
@@ -264,7 +251,8 @@ class Feed:
         df = pd.DataFrame(data=self._rows, columns=self.get_column_mapper().get_column_names())
         return df
 
-    def _get_response(self, query):
+    @staticmethod
+    def _get_response(query):
         '''
         Installing certs in Python to open SSL connections is challenging.
         Based on the level of difficultly people had installing numpy & pandas, I decided to just circumvent the necessity by
@@ -280,7 +268,69 @@ class Feed:
         return data
 
 
-class KSIFeed(Feed):
+class PagedFeedConfiguration:
+    def __init__(self, page_size:int = 2000, page_size_param_name: str = "resultRecordCount", offset_param_name: str = "resultOffset"):
+        self._page_size = page_size
+        self._page_size_param_name = page_size_param_name
+        self._offset_param_name = offset_param_name
+
+    def get_page_size(self):
+        return self._page_size
+
+    def get_page_size_param_name(self):
+        return self._page_size_param_name
+
+    def get_offset_param_name(self):
+        return self._offset_param_name
+
+    def get_page_parameters(self, page: int = 0):
+        offset = str(page * self.get_page_size())
+        page_size = str(self.get_page_size())
+        return "&" + self.get_offset_param_name() + "=" + offset + "&" + self.get_page_size_param_name() + "=" + page_size
+
+
+
+
+class PagedFeed(Feed):
+
+    def __init__(self, baseQuery: str, mapper: ColumnMapper = ColumnMapper(), paging_config: PagedFeedConfiguration = PagedFeedConfiguration()):
+        self._current_page: int = 0
+        self._paging_config = paging_config
+        self._json_parsed = list()
+        self._rows = list()
+        super().__init__(baseQuery, mapper)
+
+
+    def get_json(self, page:int = 0):
+        """:returns the json that the API returned, already parsed in Python"""
+        return self._json_parsed[page]
+
+    def get_query(self, page: int = 0):
+        """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data"""
+        return self._query + self._paging_config.get_page_parameters(page)
+
+
+    def run(self):
+        query:str = self.get_query(self._current_page)
+        json_raw = Feed._get_response(query)
+        json_parsed = json.loads(json_raw)
+        self._json_parsed.append(json_parsed)
+        rows = self.parse(json_parsed)
+        for row in rows:
+            self._rows.append(row)
+        if rows.__len__() == self._paging_config.get_page_size():
+            self._current_page = self._current_page + 1
+            self.run()
+
+
+    def parse(self, json:object = {}):
+        if self._current_page < 2:
+            return super().parse()
+        else:
+            return [[0, 1, 2, 3, 4]]
+
+
+class KSIFeed(PagedFeed):
     """This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
     You may also retrieve the ColumnMapper from this object to see how the values were mapped.
     :argument index_start the starting index of the values we want to retrieve, if not set will retrieve all indexes
@@ -307,25 +357,24 @@ class KSIFeed(Feed):
 
         super().__init__(baseQuery=query, mapper=self._column_mapper)
 
-    def parse(self):
+    def parse(self, json: object = {}):
         """This this will go get the data and populate the internal map"""
-        json_raw = self._get_response(self._query)
-        self._json_parsed = json.loads(json_raw)
+
 
         # column names and metadata are stored in a parallel level as the data in the JSON.
         # We'll use this metadata to help parse the data
+        if self._current_page == 0:
+            self._column_mapper.load_columns_from_json(json)
 
-        self._column_mapper.load_columns_from_json(self._json_parsed)
-
-        rows_json = self._json_parsed["features"]
-        self._rows = list()
+        rows_json = json["features"]
+        rows = list()
         for rows_json in rows_json:
             row = list()
             rows_json: dict = rows_json["attributes"]
             row_json = rows_json.items()
             for value in row_json:
                 row.append(self._column_mapper.transform_value(value))
-            self._rows.append(row)
-
+            rows.append(row)
+        return rows
 
 main()
