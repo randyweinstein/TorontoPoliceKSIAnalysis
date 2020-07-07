@@ -6,8 +6,8 @@ import pandas as pd
 import datetime
 from datetime import timezone
 
-
 debug = True
+
 
 # Internal note to Randy:
 # To update the docs do the following:
@@ -19,8 +19,9 @@ debug = True
 def main():
     """This main()function is all that anyone working on this project should need to alter. This provides sample code on how to retrieve a Pandas DataFrame from a KSIFeed object, and how to retrieve the column mapping for categorical data"""
 
+    ksi = KSIFeed(year_start=2010, year_end=2019)
 
-    ksi = KSIFeed(year_start=2005, year_end=2007)
+    print(ksi.get_query())
 
     injury = dict()
     injury["None"] = 1
@@ -56,7 +57,6 @@ def main():
 
     ksi.parse()
 
-
     # if you want to see the legend for mapped categorical values
     print("Column Mapping:")
     print(ksi.get_column_mapper())
@@ -66,94 +66,10 @@ def main():
 
     print(df.dtypes)
     print(df)
+    print(df['VISIBILITY'])
+
 
 # it is safe to ignore anything past this line.  I will own this code
-class KSIFeed:
-    """This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
-    You may also retrieve the ColumnMapper from this object to see how the values were mapped.
-    :argument index_start the starting index of the values we want to retrieve, if not set will retrieve all indexes
-    :argument index_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
-    index_start and index_end must both be set to be included in the query
-    :argument year_start the starting year of the values we want to retrieve, if not set will retrieve all indexes.
-    :argument year_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
-    year_start and year_end must both be set to be included in the query"""
-    def __init__(self, index_start: int = None, index_end: int = None, year_start: int = None, year_end: int = None):
-
-        self._column_mapper: ColumnMapper = ColumnMapper()
-
-        self._query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?&outFields=*&outSR=4326&f=json&"
-        # if type(index_start)__name__ == "int" and type(index_end) == "int":
-        if isinstance(index_start, int) and isinstance(index_end, int):
-            self._query.join("where=Index_%20%3E%3D%20", str(index_start), "%20AND%20Index_%20%3C%3D%20", str(index_end))
-        if isinstance(year_start, int) and isinstance(year_end, int):
-            # start = int(datetime.datetime(year=year_start, day=1, month=1, tzinfo=timezone.utc).timestamp())
-            # end = int(datetime.datetime(year=year_end, day=1, month=1, tzinfo=timezone.utc).timestamp())
-            self._query = self._query + "where=YEAR%20%3E%3D%20" + str(year_start) + "%20AND%20YEAR%20%3C%3D%20" + str(year_end)
-        if self._query.find("where") == -1:
-            self._query += "where=1%3D1"
-        print("Query to be called: " + self._query)
-
-
-
-    def set_ordinal_values(self, column_name: str, value_map: dict):
-        """This must be called before parse"""
-        self._column_mapper.set_ordinal_values(column_name, value_map)
-
-    def parse(self):
-        """This this will go get the data and populate the internal map"""
-        json_raw = self.__get_response(self._query)
-        self._json_parsed = json.loads(json_raw)
-
-        # column names and metadata are stored in a parallel level as the data in the JSON.
-        # We'll use this metadata to help parse the data
-
-        self._column_mapper.load_columns_from_json(self._json_parsed)
-
-        rows_json = self._json_parsed["features"]
-        self._rows = list()
-        for rows_json in rows_json:
-            row = list()
-            rows_json: dict = rows_json["attributes"]
-            row_json = rows_json.items()
-            for value in row_json:
-                row.append(self._column_mapper.transform_value(value))
-            self._rows.append(row)
-
-    def get_json(self):
-        """:returns the json that the API returned, already parsed in Python"""
-        return self._json_parsed
-
-    def get_query(self):
-        """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data"""
-        return self._query
-
-    def get_rows(self):
-        """:returns list a python 2 dimensional list of mixed datatypes in consistent order"""
-        return self._rows
-
-    def get_column_mapper(self):
-        """:returns ColumnMapper object"""
-        return self._column_mapper
-
-    def get_data_frame(self):
-        """:returns Pandas DataFrame. This is the main method of this class"""
-        df = pd.DataFrame(data=self._rows, columns=self._column_mapper.get_column_names())
-        return df
-
-    def __get_response(self, query):
-        '''
-        Installing certs in Python to open SSL connections is challenging.
-        Based on the level of difficultly people had installing numpy & pandas, I decided to just circumvent the necessity by
-        using _create_unverified_context().  This prints an error on a non 200 HTTP response code.
-        :return: raw json
-        '''
-        context = ssl._create_unverified_context()
-        open_url = urllib.request.urlopen(query, context=context)
-        if open_url.getcode() == 200:
-            data = open_url.read()
-        else:
-            print("Error receiving data", open_url.getcode())
-        return data
 
 
 class ColumnType:
@@ -164,6 +80,7 @@ class ColumnType:
     1. Parse the appropriate Python datatype for the column
     2. Maintain an internal map of Integer values for categorical data
     In the case that we want the Integer values to be Ordinal, we will have to modify this code so that the ColumnMapper is pre-populated with some subclassess of ColumnType where necessary"""
+
     def __init__(self, name: str, datatype: str):
         self.name: str = name
         self.datatype: str = datatype
@@ -184,7 +101,7 @@ class ColumnType:
     def override_map(self, dict):
         """This is used by the ColumnMapper to handle ordinal values"""
         if self.possible_values.__len__() > 1:
-            print ("Cannot ovveride value map for " + self.name + ", the current map is not empty");
+            print("Cannot ovveride value map for " + self.name + ", the current map is not empty");
         else:
             self.possible_values = dict
 
@@ -244,10 +161,10 @@ class ColumnType:
 
 class ColumnMapper:
     '''This object builds a list of ColumnType objects from the "fields" section of the JSON. Use this object to interact with ColumnTypes instead of instatiating ColumnTypes directly'''
+
     def __init__(self):
         self.columns: dict = dict()
         self.ordinals_override: dict = dict()
-
 
     def __str__(self):
         """Prints out the current list of ColumnTypes
@@ -260,7 +177,7 @@ class ColumnMapper:
     def set_ordinal_values(self, column_name: str, value_map: dict):
         column_type: ColumnType = ColumnType(column_name, "OVERRIDE")
         column_type.override_map(value_map)
-        self.ordinals_override[column_name] =column_type
+        self.ordinals_override[column_name] = column_type
 
     def load_columns_from_json(self, columns_json: dict):
         """ to be called after calling set_ordinal_values() but before calling transform_value()"""
@@ -287,6 +204,128 @@ class ColumnMapper:
     def get_column_names(self):
         """:returns list a list of all the column names, useful in creating a pandas DataFrame"""
         return self.columns.keys()
+
+
+class KSIColumnMapper(ColumnMapper):
+
+    def __init__(self):
+        super().__init__()
+
+
+
+class Feed:
+
+    def __init__(self, baseQuery: str, mapper: ColumnMapper = ColumnMapper()):
+        self._column_mapper: mapper
+        self._query = baseQuery
+
+    def set_ordinal_values(self, column_name: str, value_map: dict):
+        """This must be called before parse"""
+        self.get_column_mapper().set_ordinal_values(column_name, value_map)
+
+    def parse(self):
+        """This this will go get the data and populate the internal map"""
+        json_raw = self._get_response(self._query)
+        self._json_parsed = json.loads(json_raw)
+
+        # column names and metadata are stored in a parallel level as the data in the JSON.
+        # We'll use this metadata to help parse the data
+
+        self.get_column_mapper().load_columns_from_json(self._json_parsed)
+
+        rows_json = self._json_parsed["features"]
+        self._rows = list()
+        for rows_json in rows_json:
+            row = list()
+            rows_json: dict = rows_json["attributes"]
+            row_json = rows_json.items()
+            for value in row_json:
+                row.append(self.get_column_mapper().transform_value(value))
+            self._rows.append(row)
+
+    def get_json(self):
+        """:returns the json that the API returned, already parsed in Python"""
+        return self._json_parsed
+
+    def get_query(self):
+        """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data"""
+        return self._query
+
+    def get_rows(self):
+        """:returns list a python 2 dimensional list of mixed datatypes in consistent order"""
+        return self._rows
+
+    def get_column_mapper(self):
+        """:returns ColumnMapper object"""
+        return self._column_mapper
+
+    def get_data_frame(self):
+        """:returns Pandas DataFrame. This is the main method of this class"""
+        df = pd.DataFrame(data=self._rows, columns=self.get_column_mapper().get_column_names())
+        return df
+
+    def _get_response(self, query):
+        '''
+        Installing certs in Python to open SSL connections is challenging.
+        Based on the level of difficultly people had installing numpy & pandas, I decided to just circumvent the necessity by
+        using _create_unverified_context().  This prints an error on a non 200 HTTP response code.
+        :return: raw json
+        '''
+        context = ssl._create_unverified_context()
+        open_url = urllib.request.urlopen(query, context=context)
+        if open_url.getcode() == 200:
+            data = open_url.read()
+        else:
+            print("Error receiving data", open_url.getcode())
+        return data
+
+
+class KSIFeed(Feed):
+    """This is the main object for calling the KSI API and retrieving a Pandas DataFrame object.
+    You may also retrieve the ColumnMapper from this object to see how the values were mapped.
+    :argument index_start the starting index of the values we want to retrieve, if not set will retrieve all indexes
+    :argument index_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+    index_start and index_end must both be set to be included in the query
+    :argument year_start the starting year of the values we want to retrieve, if not set will retrieve all indexes.
+    :argument year_end largest index of the values we want to retrieve, , if not set will retrieve all indexes.
+    year_start and year_end must both be set to be included in the query"""
+
+    def __init__(self, index_start: int = None, index_end: int = None, year_start: int = None, year_end: int = None):
+
+        self._column_mapper = KSIColumnMapper()
+
+        query: str = "https://services.arcgis.com/S9th0jAJ7bqgIRjw/arcgis/rest/services/KSI/FeatureServer/0/query?&outFields=*&outSR=4326&f=json&resultRecordCount=16000&"
+        # if type(index_start)__name__ == "int" and type(index_end) == "int":
+        if isinstance(index_start, int) and isinstance(index_end, int):
+            query.join("where=Index_%20%3E%3D%20", str(index_start), "%20AND%20Index_%20%3C%3D%20", str(index_end))
+        if isinstance(year_start, int) and isinstance(year_end, int):
+            # start = int(datetime.datetime(year=year_start, day=1, month=1, tzinfo=timezone.utc).timestamp())
+            # end = int(datetime.datetime(year=year_end, day=1, month=1, tzinfo=timezone.utc).timestamp())
+            query = query + "where=YEAR%20%3E%3D%20" + str(year_start) + "%20AND%20YEAR%20%3C%3D%20" + str(year_end)
+        if query.find("where") == -1:
+            query += "where=1%3D1"
+
+        super().__init__(baseQuery=query, mapper=self._column_mapper)
+
+    def parse(self):
+        """This this will go get the data and populate the internal map"""
+        json_raw = self._get_response(self._query)
+        self._json_parsed = json.loads(json_raw)
+
+        # column names and metadata are stored in a parallel level as the data in the JSON.
+        # We'll use this metadata to help parse the data
+
+        self._column_mapper.load_columns_from_json(self._json_parsed)
+
+        rows_json = self._json_parsed["features"]
+        self._rows = list()
+        for rows_json in rows_json:
+            row = list()
+            rows_json: dict = rows_json["attributes"]
+            row_json = rows_json.items()
+            for value in row_json:
+                row.append(self._column_mapper.transform_value(value))
+            self._rows.append(row)
 
 
 main()
