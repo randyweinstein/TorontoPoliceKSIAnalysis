@@ -6,7 +6,6 @@ import pandas as pd
 import datetime
 from datetime import timezone
 
-debug = True
 
 
 # Internal note to Randy:
@@ -60,7 +59,6 @@ def main():
     # if you want to see the legend for mapped categorical values
     # print("Column Mapping:")
     # print(ksi.get_column_mapper())
-    print(ksi.get_rows())
 
     # the main call. Here is your Pandas DataFrame
     df = ksi.get_data_frame()
@@ -74,13 +72,10 @@ def main():
 
 
 class ColumnType:
-    """The KSI data feed has two significant problems that this object tries to address:
-    1. Objects are stored and returned as a string, even if the data is a DateTime, Integer, Float, or Boolean value
-    2. For categorical values, there is no list of possible values in the KSI documentation
-    Therefore, this object has two main functions:
-    1. Parse the appropriate Python datatype for the column
-    2. Maintain an internal map of Integer values for categorical data
-    In the case that we want the Integer values to be Ordinal, we will have to modify this code so that the ColumnMapper is pre-populated with some subclassess of ColumnType where necessary"""
+    """This base class represents a column in a data feed.
+    Initialize it with a datatype to give hints on how to transform the value.
+    Override transform_value() in order to have fine grained control on how to construct a dataframe
+    """
 
     def __init__(self, name: str, datatype: str):
         self.name: str = name
@@ -105,6 +100,50 @@ class ColumnType:
             print("Cannot ovveride value map for " + self.name + ", the current map is not empty");
         else:
             self.possible_values = dict
+
+    def transform_value(self, value: str):
+        """Columns are transformed via the ollowing logicfollowing logic:
+        -  None values are returned as is
+        - "Yes" or "No" are retuyned as a Python bool
+        - if the number looks like an Integer, return a Python int
+        - if the number looks like an Float, return a Python float
+        - if the number is a categorical value, ie it did not pass the previous checks, then
+        build a map of the values as we encounter them and return a Python int. The value of the int
+        represents the order in which the categorical value appeared in the feed, these are not ordinal values.
+        In order to return ordinal values, subclass this object and pre-populate the ColumnMapper with an instance
+        of this subclass"""
+        # don't wast time on null values.  Just return the null value
+        if value is None:
+            return value
+        if isinstance(value, str):
+            if value == "Yes":
+                return True
+            if value == "No":
+                return False
+
+            # if this an integer masquerading as a string
+            if value.isdigit():
+                return int(value)
+
+            # if this is a float masquerading as a string
+            if value.isdecimal():
+                return float(value)
+
+            # if this is categorical data, we are are going to assign int values incrementally
+            # and always return the same int for a given string value
+            if value not in self.possible_values:
+                self.possible_values[value] = int(len(self.possible_values) + 1)
+            return self.possible_values[value]
+
+
+class KSIColumnType(ColumnType):
+    """The KSI data feed has two significant problems that this object tries to address:
+    1. Objects are stored and returned as a string, even if the data is a DateTime, Integer, Float, or Boolean value
+    2. For categorical values, there is no list of possible values in the KSI documentation
+    Therefore, this object has two main functions:
+    1. Parse the appropriate Python datatype for the column
+    2. Maintain an internal map of Integer values for categorical data
+    In the case that we want the Integer values to be Ordinal, we will have to modify this code so that the ColumnMapper is pre-populated with some subclassess of ColumnType where necessary"""
 
     def transform_value(self, value: str):
         """This is the "meat" of the project. The logic is as follows:
@@ -213,25 +252,44 @@ class KSIColumnMapper(ColumnMapper):
     def __init__(self):
         super().__init__()
 
+    def set_ordinal_values(self, column_name: str, value_map: dict):
+        column_type: KSIColumnType = KSIColumnType(column_name, "OVERRIDE")
+        column_type.override_map(value_map)
+        self.ordinals_override[column_name] = column_type
 
+    def load_columns_from_json(self, columns_json: dict):
+        """ to be called after calling set_ordinal_values() but before calling transform_value()"""
+        for field in columns_json["fields"]:
+            name = field["name"]
+            sql_type: str = str(field["type"])
+            formatted_type = sql_type[13:]
+            self.columns[name] = KSIColumnType(name, formatted_type)
+        for ordinal in self.ordinals_override.keys():
+            self.columns[ordinal] = self.ordinals_override[ordinal]
 
 
 class Feed:
+    '''Abstract class representing a feed.  Override parse() to implement.'''
+
+    # static SSL context for static _get_response() method
+    context = ssl._create_unverified_context()
 
     def __init__(self, baseQuery: str, mapper: ColumnMapper = ColumnMapper()):
         self._column_mapper: mapper
         self._query = baseQuery
         self._rows = list();
 
+
     def set_ordinal_values(self, column_name: str, value_map: dict):
         """This must be called before parse"""
         self.get_column_mapper().set_ordinal_values(column_name, value_map)
 
     def parse(self, json:object = {}):
-        """This this will go get the data and populate the internal map"""
-        return [[0, 1, 2, 3, 4], [1, 3, 5, 6, 7], [3, 5, 6, 7, 9]]
+        """Override this method in order to read a feed."""
+        raise NotImplementedError()
 
     def run(self):
+        """Calls parse."""
         self._rows = self.parse()
 
     def get_query(self):
@@ -259,8 +317,7 @@ class Feed:
         using _create_unverified_context().  This prints an error on a non 200 HTTP response code.
         :return: raw json
         '''
-        context = ssl._create_unverified_context()
-        open_url = urllib.request.urlopen(query, context=context)
+        open_url = urllib.request.urlopen(query, context=Feed.context)
         if open_url.getcode() == 200:
             data = open_url.read()
         else:
@@ -269,6 +326,8 @@ class Feed:
 
 
 class PagedFeedConfiguration:
+    """This configuration assumes that the model for pagination is to set page size and page number as URL paramters.
+    This configuratrion does not support next page tokens embedded in response json"""
     def __init__(self, page_size:int = 2000, page_size_param_name: str = "resultRecordCount", offset_param_name: str = "resultOffset"):
         self._page_size = page_size
         self._page_size_param_name = page_size_param_name
@@ -292,6 +351,8 @@ class PagedFeedConfiguration:
 
 
 class PagedFeed(Feed):
+    """This class extends Feed.  It handles the case where page size is limited by the server and you must iterate through many pages.
+    Page size and page number URL parameters are configured via the PagedFeedConfiguration object. """
 
     def __init__(self, baseQuery: str, mapper: ColumnMapper = ColumnMapper(), paging_config: PagedFeedConfiguration = PagedFeedConfiguration()):
         self._current_page: int = 0
@@ -302,15 +363,19 @@ class PagedFeed(Feed):
 
 
     def get_json(self, page:int = 0):
-        """:returns the json that the API returned, already parsed in Python"""
+        """:returns the json that the API returned, already parsed in Python
+        defaults to the first page retrieved unless you specify the page number"""
         return self._json_parsed[page]
 
     def get_query(self, page: int = 0):
-        """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data"""
+        """:returns the query that this object called the API with. Cut and paste into a browser to see the raw data
+        defaults to the first page retrieved unless you specify the page number"""
         return self._query + self._paging_config.get_page_parameters(page)
 
 
     def run(self):
+        """RECURSIVE METHOD that calls parse() repeatedly until the number of results is less than the page size
+        Due to time constraints, edge cases not tested."""
         query:str = self.get_query(self._current_page)
         json_raw = Feed._get_response(query)
         json_parsed = json.loads(json_raw)
@@ -324,10 +389,8 @@ class PagedFeed(Feed):
 
 
     def parse(self, json:object = {}):
-        if self._current_page < 2:
-            return super().parse()
-        else:
-            return [[0, 1, 2, 3, 4]]
+        """Override this method in order to read a feed."""
+        raise NotImplementedError()
 
 
 class KSIFeed(PagedFeed):
@@ -358,9 +421,8 @@ class KSIFeed(PagedFeed):
         super().__init__(baseQuery=query, mapper=self._column_mapper)
 
     def parse(self, json: object = {}):
-        """This this will go get the data and populate the internal map"""
-
-
+        """This this will go get the data and populate the internal map.
+        It is called repeatedly by the run() method of the parent class until there are no more pages of rows"""
         # column names and metadata are stored in a parallel level as the data in the JSON.
         # We'll use this metadata to help parse the data
         if self._current_page == 0:
