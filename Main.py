@@ -220,15 +220,9 @@ class ColumnMapper:
         self.ordinals_override[column_name] = column_type
 
     def load_columns_from_json(self, columns_json: dict):
-        """ to be called after calling set_ordinal_values() but before calling transform_value()"""
+        """ Override"""
+        raise NotImplementedError()
 
-        for field in columns_json["fields"]:
-            name = field["name"]
-            sql_type: str = str(field["type"])
-            formatted_type = sql_type[13:]
-            self.columns[name] = ColumnType(name, formatted_type)
-        for ordinal in self.ordinals_override.keys():
-            self.columns[ordinal] = self.ordinals_override[ordinal]
 
     def transform_value(self, value: tuple):
         """Convenience method to look up the correct ColumnType for a value
